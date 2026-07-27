@@ -24,14 +24,14 @@ REQUIRED_COLUMNS = [
 # Helper Function
 # ==========================================================
 
-def add_error(errors, error_type, column, row, value, description):
+def add_error(errors, df_columns, error_type, column, row, value, description):
     """
     Adds a structured validation error.
     """
 
     column_index = list(df_columns).index(column) + 1
     excel_column = get_column_letter(column_index)
-    excel_row = row + 2  # +1 for zero-based index, +1 for header row
+    excel_row = row + 2  # +1 for header row
 
     errors.append({
         "Severity": "Error",
@@ -48,9 +48,6 @@ def add_error(errors, error_type, column, row, value, description):
 # ==========================================================
 
 def validate_data(df):
-
-    global df_columns
-    df_columns = df.columns.tolist()
 
     errors = []
 
@@ -96,6 +93,9 @@ def validate_data(df):
 
         return False, errors
 
+    # Save column names for helper function
+    df_columns = df.columns.tolist()
+
     # ======================================================
     # Missing Values
     # ======================================================
@@ -119,6 +119,7 @@ def validate_data(df):
 
             add_error(
                 errors,
+                df_columns,
                 "Missing Value",
                 column,
                 row,
@@ -135,12 +136,16 @@ def validate_data(df):
         errors="coerce"
     )
 
-    invalid_rows = converted_dates[converted_dates.isna()].index
+    invalid_rows = converted_dates[
+        converted_dates.isna() &
+        df["Posting Date"].notna()
+    ].index
 
     for row in invalid_rows:
 
         add_error(
             errors,
+            df_columns,
             "Invalid Date",
             "Posting Date",
             row,
@@ -166,12 +171,16 @@ def validate_data(df):
             errors="coerce"
         )
 
-        invalid_rows = converted[converted.isna()].index
+        invalid_rows = converted[
+            converted.isna() &
+            df[column].notna()
+        ].index
 
         for row in invalid_rows:
 
             add_error(
                 errors,
+                df_columns,
                 "Invalid Number",
                 column,
                 row,
@@ -200,6 +209,7 @@ def validate_data(df):
 
             add_error(
                 errors,
+                df_columns,
                 "Negative Value",
                 column,
                 row,
