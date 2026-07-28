@@ -1,10 +1,6 @@
 import pandas as pd
 from openpyxl.utils import get_column_letter
 
-# ==========================================================
-# Required Columns
-# ==========================================================
-
 REQUIRED_COLUMNS = [
     "Item Code",
     "Item Name",
@@ -20,18 +16,14 @@ REQUIRED_COLUMNS = [
 ]
 
 
-# ==========================================================
-# Helper Function
-# ==========================================================
-
-def add_error(errors, df_columns, error_type, column, row, value, description):
-    """
-    Adds a structured validation error.
-    """
+def add_error(errors, df_columns, error_type, column, row, value, description, header_row):
+    """Adds a structured validation error."""
 
     column_index = list(df_columns).index(column) + 1
     excel_column = get_column_letter(column_index)
-    excel_row = row + 2  # +1 for header row
+
+    # Convert DataFrame index to original Excel row number
+    excel_row = row + header_row + 2
 
     errors.append({
         "Severity": "Error",
@@ -43,62 +35,68 @@ def add_error(errors, df_columns, error_type, column, row, value, description):
     })
 
 
-# ==========================================================
-# Validation
-# ==========================================================
+def validate_data(df, header_row=0):
+    """
+    Validate ERP data.
 
-def validate_data(df):
+    Parameters
+    ----------
+    df : pandas.DataFrame
+    header_row : int
+        Zero-based Excel header row detected in the ETL.
+
+    Returns
+    -------
+    (bool, list)
+    """
 
     errors = []
 
-    # ======================================================
-    # Empty File
-    # ======================================================
+    # Remove completely blank rows
+    df = df.dropna(how="all").copy()
+
+    # Ignore ERP total row
+    if "Item Code" in df.columns:
+        mask = (
+            df["Item Code"]
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .eq("TOTAL")
+        )
+        df = df.loc[~mask]
+
+    # Keep original Excel row numbers
+    df = df.reset_index(drop=False).rename(columns={"index": "_excel_index"})
 
     if df.empty:
-
-        errors.append({
+        return False, [{
             "Severity": "Error",
             "Type": "Empty File",
             "Cell": "-",
             "Column": "-",
             "Value": "-",
             "Description": "Uploaded file contains no records."
-        })
-
-        return False, errors
-
-    # ======================================================
-    # Required Columns
-    # ======================================================
+        }]
 
     missing_columns = [
-        column
-        for column in REQUIRED_COLUMNS
-        if column not in df.columns
+        c for c in REQUIRED_COLUMNS
+        if c not in df.columns
     ]
 
     if missing_columns:
-
-        for column in missing_columns:
-
+        for c in missing_columns:
             errors.append({
                 "Severity": "Error",
                 "Type": "Missing Column",
                 "Cell": "-",
-                "Column": column,
+                "Column": c,
                 "Value": "-",
                 "Description": "Required column is missing."
             })
-
         return False, errors
 
-    # Save column names for helper function
-    df_columns = df.columns.tolist()
-
-    # ======================================================
-    # Missing Values
-    # ======================================================
+    df_columns = [c for c in df.columns if c != "_excel_index"]
 
     required_fields = [
         "Item Code",
@@ -112,50 +110,38 @@ def validate_data(df):
     ]
 
     for column in required_fields:
+        missing = df[df[column].isna()]
 
-        missing_rows = df[df[column].isna()].index
-
-        for row in missing_rows:
-
+        for _, r in missing.iterrows():
             add_error(
                 errors,
                 df_columns,
                 "Missing Value",
                 column,
-                row,
+                int(r["_excel_index"]),
                 None,
-                "This field cannot be empty."
+                "This field cannot be empty.",
+                header_row
             )
 
-    # ======================================================
-    # Invalid Dates
-    # ======================================================
+    converted_dates = pd.to_datetime(df["Posting Date"], errors="coerce")
 
-    converted_dates = pd.to_datetime(
-        df["Posting Date"],
-        errors="coerce"
-    )
-
-    invalid_rows = converted_dates[
+    invalid_dates = df[
         converted_dates.isna() &
         df["Posting Date"].notna()
-    ].index
+    ]
 
-    for row in invalid_rows:
-
+    for _, r in invalid_dates.iterrows():
         add_error(
             errors,
             df_columns,
             "Invalid Date",
             "Posting Date",
-            row,
-            df.loc[row, "Posting Date"],
-            "Invalid date format."
+            int(r["_excel_index"]),
+            r["Posting Date"],
+            "Invalid date format.",
+            header_row
         )
-
-    # ======================================================
-    # Invalid Numeric Values
-    # ======================================================
 
     numeric_columns = [
         "Stock Qty",
@@ -166,62 +152,39 @@ def validate_data(df):
 
     for column in numeric_columns:
 
-        converted = pd.to_numeric(
-            df[column],
-            errors="coerce"
-        )
+        converted = pd.to_numeric(df[column], errors="coerce")
 
-        invalid_rows = converted[
+        invalid = df[
             converted.isna() &
             df[column].notna()
-        ].index
+        ]
 
-        for row in invalid_rows:
-
+        for _, r in invalid.iterrows():
             add_error(
                 errors,
                 df_columns,
                 "Invalid Number",
                 column,
-                row,
-                df.loc[row, column],
-                "Numeric value expected."
+                int(r["_excel_index"]),
+                r[column],
+                "Numeric value expected.",
+                header_row
             )
 
-    # ======================================================
-    # Negative Values
-    # ======================================================
+    # Only Rate cannot be negative.
+    converted_rate = pd.to_numeric(df["Rate"], errors="coerce")
+    negative_rate = df[converted_rate < 0]
 
-    for column in [
-        "Stock Qty",
-        "Rate",
-        "Amount"
-    ]:
-
-        converted = pd.to_numeric(
-            df[column],
-            errors="coerce"
+    for _, r in negative_rate.iterrows():
+        add_error(
+            errors,
+            df_columns,
+            "Negative Value",
+            "Rate",
+            int(r["_excel_index"]),
+            r["Rate"],
+            "Negative values are not allowed.",
+            header_row
         )
 
-        negative_rows = converted[converted < 0].index
-
-        for row in negative_rows:
-
-            add_error(
-                errors,
-                df_columns,
-                "Negative Value",
-                column,
-                row,
-                df.loc[row, column],
-                "Negative values are not allowed."
-            )
-
-    # ======================================================
-    # Final Result
-    # ======================================================
-
-    if errors:
-        return False, errors
-
-    return True, []
+    return (len(errors) == 0), errors

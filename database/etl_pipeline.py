@@ -1,10 +1,42 @@
+﻿import hashlib
 import sqlite3
 import pandas as pd
+from datetime import datetime
+from pathlib import Path
 
 from database.db import get_connection
 from database.validation import validate_data
 from database.preprocessing import preprocess_data
 
+# =====================================================
+# ERP Configuration
+# =====================================================
+
+ERP_HEADER_ROW = 4  # Excel Row 5
+
+
+# =====================================================
+# File Hash
+# =====================================================
+
+def calculate_file_hash(file_path):
+    """
+    Calculates a SHA-256 hash of the uploaded Excel file.
+    Used to prevent the same file from being uploaded twice.
+    """
+
+    sha = hashlib.sha256()
+
+    with open(file_path, "rb") as file:
+        while chunk := file.read(8192):
+            sha.update(chunk)
+
+    return sha.hexdigest()
+
+
+# =====================================================
+# Upload Pipeline
+# =====================================================
 
 def upload_excel(file_path):
 
@@ -13,7 +45,31 @@ def upload_excel(file_path):
     # =====================================================
 
     try:
-        df = pd.read_excel(file_path)
+
+        temp = pd.read_excel(file_path, header=None)
+
+        header_row = None
+
+        for row_index, (_, row) in enumerate(temp.iterrows()):
+
+            values = [str(value).strip() for value in row.tolist()]
+
+            if "Item Code" in values:
+                header_row = row_index
+                break
+
+        if header_row is None:
+            raise Exception("Could not find the ERP header row.")
+
+        df = pd.read_excel(file_path, header=header_row)
+
+        df = df.dropna(how="all")
+
+        df.columns = (
+            df.columns
+            .astype(str)
+            .str.strip()
+        )
 
     except Exception as e:
 
@@ -24,30 +80,35 @@ def upload_excel(file_path):
         }
 
     rows_read = len(df)
+    file_name = Path(file_path).name
+    file_hash = calculate_file_hash(file_path)
 
     # =====================================================
     # Validation
     # =====================================================
 
-    valid, validation_report = validate_data(df)
+    valid, validation_report = validate_data(df, header_row)
 
     if not valid:
 
         return {
-
             "success": False,
-
             "stage": "validation",
-
             "report": validation_report
-
         }
 
     # =====================================================
     # Preprocessing
     # =====================================================
 
-    clean_df, cleaning_report = preprocess_data(df)
+    (
+        clean_df,
+        cleaning_report,
+        data_quality_summary,
+        report_path
+    ) = preprocess_data(df) # type: ignore
+
+    rows_ready_for_upload = len(clean_df)
 
     # =====================================================
     # Database Connection
@@ -57,71 +118,84 @@ def upload_excel(file_path):
     cursor = conn.cursor()
 
     # =====================================================
-    # Get Existing Invoices
+    # Duplicate File Check
     # =====================================================
 
-    cursor.execute("SELECT invoice FROM sales")
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM upload_history
+        WHERE file_hash = ?
+        AND status = 'SUCCESS'
+    """, (file_hash,))
 
-    existing_invoices = {
-        row["invoice"]
-        for row in cursor.fetchall()
-    }
+    duplicate_file = cursor.fetchone()[0] > 0
 
-    uploaded_invoices = set(clean_df["Invoice"])
+    if duplicate_file:
 
-    duplicate_invoices = uploaded_invoices.intersection(existing_invoices)
+        cursor.execute("""
+            INSERT INTO upload_history(
 
-    new_invoices = uploaded_invoices.difference(existing_invoices)
+                upload_timestamp,
+                file_name,
+                file_hash,
+                rows_read,
+                rows_after_preprocessing,
+                rows_inserted,
+                rows_skipped,
+                duplicate_file,
+                status,
+                message
 
-    # =====================================================
-    # Entire File Already Uploaded
-    # =====================================================
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
 
-    if len(new_invoices) == 0:
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            file_name,
+            file_hash,
+            rows_read,
+            0,
+            0,
+            rows_read,
+            True,
+            "REJECTED",
+            "Duplicate file upload attempted."
 
+        ))
+
+        conn.commit()
         conn.close()
 
         return {
-
             "success": False,
-
-            "stage": "duplicate_check",
-
-            "duplicate_file": True,
-
-            "message":
-                "This dataset has already been uploaded.",
-
-            "rows_read": rows_read,
-
-            "existing_records": len(existing_invoices),
-
-            "matching_records": len(duplicate_invoices),
-
-            "duplicate_invoices": sorted(list(duplicate_invoices))
+            "stage": "duplicate_file",
+            "message": "This Excel file has already been uploaded."
         }
 
-    # =====================================================
-    # Upload Only New Records
-    # =====================================================
-
-    rows_inserted = 0
-
-    skipped_invoices = []
+    rows_uploaded = 0
 
     try:
 
+        # =====================================================
+        # Upload Sales Records
+        # =====================================================
+
         for _, row in clean_df.iterrows():
 
-            if row["Invoice"] in existing_invoices:
-
-                skipped_invoices.append(row["Invoice"])
-                continue
+            record_hash = hashlib.sha256(
+                (
+                    f"{row['Invoice']}|"
+                    f"{row['Item Code']}|"
+                    f"{row['Posting Date']}|"
+                    f"{row['Stock Qty']}|"
+                    f"{row['Amount']}"
+                ).encode("utf-8")
+            ).hexdigest()
 
             cursor.execute("""
+                INSERT INTO sales (
 
-                INSERT INTO sales(
-
+                    record_hash,
                     invoice,
                     item_code,
                     item_name,
@@ -132,57 +206,127 @@ def upload_excel(file_path):
                     stock_qty,
                     discount_percent,
                     rate,
-                    amount
+                    amount,
+                    transaction_type
 
                 )
-
-                VALUES(
-
-                    ?,?,?,?,?,?,?,?,?,?,?
-
-                )
-
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
 
+                record_hash,
                 row["Invoice"],
                 row["Item Code"],
-                row["Item Name"],
-                row["Item Group"],
-                row["Customer"],
-                row["Place of Supply"],
-                row["Posting Date"],
-                row["Stock Qty"],
-                row["Discount %"],
-                row["Rate"],
-                row["Amount"]
+                row.get("Item Name"),
+                row.get("Item Group"),
+                row.get("Customer"),
+                row.get("Place of Supply"),
+                row.get("Posting Date"),
+                row.get("Stock Qty"),
+                row.get("Discount %"),
+                row.get("Rate"),
+                row.get("Amount"),
+                row["transaction_type"]
 
             ))
 
-            rows_inserted += 1
+            rows_uploaded += 1
+
+        # =====================================================
+        # Upload History
+        # =====================================================
+
+        cursor.execute("""
+            INSERT INTO upload_history (
+
+                upload_timestamp,
+                file_name,
+                file_hash,
+                rows_read,
+                rows_after_preprocessing,
+                rows_inserted,
+                rows_skipped,
+                duplicate_file,
+                status,
+                message
+
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            file_name,
+            file_hash,
+            rows_read,
+            rows_ready_for_upload,
+            rows_uploaded,
+            0,
+            False,
+            "SUCCESS",
+            f"{rows_uploaded} records uploaded successfully."
+
+        ))
 
         conn.commit()
+
+    # =====================================================
+    # Database Error Handling
+    # =====================================================
 
     except sqlite3.Error as e:
 
         conn.rollback()
 
+        cursor.execute("""
+            INSERT INTO upload_history (
+
+                upload_timestamp,
+                file_name,
+                file_hash,
+                rows_read,
+                rows_after_preprocessing,
+                rows_inserted,
+                rows_skipped,
+                duplicate_file,
+                status,
+                message
+
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            file_name,
+            file_hash,
+            rows_read,
+            rows_ready_for_upload,
+            rows_uploaded,
+            0,
+            False,
+            "FAILED",
+            str(e)
+
+        ))
+
+        conn.commit()
         conn.close()
 
         return {
 
             "success": False,
-
             "stage": "database",
-
             "message": str(e)
 
         }
 
-    conn.close()
+    finally:
+
+        conn.close()
 
     # =====================================================
     # Upload Summary
     # =====================================================
+
+    rows_removed = rows_read - rows_ready_for_upload
 
     return {
 
@@ -190,24 +334,38 @@ def upload_excel(file_path):
 
         "status": "Upload Completed Successfully",
 
+        "message": f"{rows_uploaded} records uploaded successfully.",
+
+        "upload_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
         "rows_read": rows_read,
 
-        "rows_after_preprocessing": len(clean_df),
+        "rows_after_preprocessing": rows_ready_for_upload,
 
-        "rows_inserted": rows_inserted,
+        "rows_removed": rows_removed,
 
-        "rows_skipped": len(skipped_invoices),
+        "return_transactions": data_quality_summary.get(
+            "Return Transactions",
+            0
+        ),
 
-        "cleaning_report": cleaning_report,
+        "duplicate_rows": data_quality_summary.get(
+            "Exact Duplicate Rows",
+            0
+        ),
+
+        "rows_inserted": rows_uploaded,
+
+        "rows_skipped": 0,
 
         "duplicate_file": False,
 
-        "existing_records_found": len(skipped_invoices) > 0,
+        "existing_records_found": False,
 
-        "duplicate_invoices": skipped_invoices,
+        "data_quality_summary": data_quality_summary,
 
-        "message":
+        "report_path": str(report_path),
 
-            f"{rows_inserted} new records uploaded successfully."
+        "cleaning_report": cleaning_report
 
     }
