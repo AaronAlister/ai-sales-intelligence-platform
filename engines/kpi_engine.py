@@ -138,10 +138,15 @@ class KPIEngine:
     # =====================================================
 
     def total_products(self):
+        """
+        Returns the number of distinct products that have at least one sale.
+        """
+
         return self.scalar("""
             SELECT COUNT(DISTINCT item_code)
             FROM sales
-        """)
+            WHERE transaction_type = 'Sale'
+            """)
 
     # =====================================================
     # CUSTOMER KPIs
