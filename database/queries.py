@@ -1,14 +1,25 @@
+import pandas as pd
+
 from database.db import get_connection
 
-conn = get_connection()
-cursor = conn.cursor()
 
-cursor.execute("""
-SELECT
-    SUM(amount) AS return_transactions_amount
-FROM sales
-WHERE amount < 0
-""")
+class SalesQueries:
 
-print(cursor.fetchone())
-conn.close()
+    @staticmethod
+    def customer_sales():
+        """
+        Returns all sales transactions.
+        """
+
+        conn = get_connection()
+
+        query = """
+        SELECT *
+        FROM sales
+        """
+
+        df = pd.read_sql_query(query, conn)
+
+        conn.close()
+
+        return df
