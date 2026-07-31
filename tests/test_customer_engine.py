@@ -118,32 +118,3 @@ try:
 except ValueError as e:
     print(e)
 
-print("\n" + "=" * 70)
-print("DEBUG - CUSTOMER CONTRIBUTION")
-print("=" * 70)
-
-contribution = engine.customer_contribution()
-
-print(
-    contribution[
-        contribution["customer"]
-        .str.strip()
-        .str.lower()
-        == "fountain bazaar"
-    ]
-)
-
-print("\n" + "=" * 70)
-print("DEBUG - ABC ANALYSIS")
-print("=" * 70)
-
-abc = engine.abc_customer_analysis()
-
-print(
-    abc[
-        abc["customer"]
-        .str.strip()
-        .str.lower()
-        == "fountain bazaar"
-    ]
-)
