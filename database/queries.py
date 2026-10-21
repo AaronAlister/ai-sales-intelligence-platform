@@ -1,25 +1,88 @@
-import pandas as pd
+"""
+Reusable sales database queries.
+
+These functions are used by dashboards and the upload page.
+"""
+
+from __future__ import annotations
+
+from typing import Any
 
 from database.db import get_connection
+from database.history import (
+    get_last_upload,
+    get_successful_upload_count,
+    get_upload_count,
+    get_upload_history,
+)
 
 
 class SalesQueries:
+    """Queries used by the sales intelligence dashboards."""
 
     @staticmethod
-    def customer_sales():
-        """
-        Returns all sales transactions.
-        """
+    def customer_sales() -> list[dict[str, Any]]:
+        """Return all sales records."""
 
         conn = get_connection()
 
-        query = """
-        SELECT *
-        FROM sales
-        """
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM sales")
+            return [dict(row) for row in cursor.fetchall()]
 
-        df = pd.read_sql_query(query, conn)
+        finally:
+            conn.close()
 
-        conn.close()
+    @staticmethod
+    def get_dataset_summary() -> dict[str, Any]:
+        """Return high-level dataset statistics."""
 
-        return df
+        conn = get_connection()
+
+        try:
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT COUNT(*) FROM sales")
+            total_records = int(cursor.fetchone()[0])
+
+            cursor.execute(
+                """
+                SELECT COUNT(DISTINCT invoice)
+                FROM sales
+                """
+            )
+            total_invoices = int(cursor.fetchone()[0])
+
+            cursor.execute(
+                """
+                SELECT MIN(posting_date), MAX(posting_date)
+                FROM sales
+                """
+            )
+            date_range = cursor.fetchone()
+
+            return {
+                "total_records": total_records,
+                "total_invoices": total_invoices,
+                "first_date": date_range[0],
+                "last_date": date_range[1],
+                "total_uploads": get_successful_upload_count(),
+                "successful_uploads": get_successful_upload_count(),
+                "last_upload": get_last_upload(),
+            }
+
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_upload_history(limit: int = 20) -> list[dict[str, Any]]:
+        """Return recent upload history."""
+
+        return get_upload_history(limit=limit)
+
+    @staticmethod
+    def get_last_upload() -> dict[str, Any] | None:
+        """Return the latest upload."""
+
+        return get_last_upload()

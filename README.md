@@ -203,3 +203,52 @@ Comprehensive Software Design Documents are available for every major module.
 ## License
 
 This repository contains the implementation of an internal Business Intelligence platform. Proprietary business datasets are not included.
+
+# AQVASTAR ML and Intelligence Layer
+
+This package adds ML and evidence-based business findings without replacing the existing engines or dashboards.
+
+## Included
+
+- `ml/anomaly_detection.py`: Isolation Forest detection for unusual monthly metrics and discount outliers.
+- `ml/segmentation.py`: RFM features with K-means customer segments.
+- `ml/recommendations.py`: Explainable product opportunities and customer re-engagement candidates.
+- `ml/forecasting.py`: Adapter to the existing `ForecastEngine`.
+- `intelligence/intelligence_engine.py`: Runs ML modules and assembles findings.
+- `dashboards/ai_dashboard.py`: Streamlit dashboard for running and reviewing findings.
+- `ai/`: Lightweight question routing and report formatting. LLM provider intentionally left unconfigured.
+
+## Add to your project
+
+Copy the `ml`, `intelligence`, and `ai` folders into your project, and copy `dashboards/ai_dashboard.py` into your existing `dashboards` folder. Review/merge rather than overwrite if any of these files already contain work.
+
+Your project must be run from its root folder so `data/sales.db` resolves correctly:
+
+```powershell
+streamlit run app.py
+```
+
+## Connect the dashboard
+
+If `app.py` already routes `page == "ai"` to `dashboards.ai_dashboard`, retain that route and ensure it calls:
+
+```python
+from dashboards.ai_dashboard import render_ai_dashboard
+render_ai_dashboard()
+```
+
+If your app uses a different entry function convention, adapt that one import/call to match the existing pattern.
+
+To add a navigation button, add `("ai", "INTELLIGENCE")` to the existing navigation page tuple in `dashboards/components/navigation.py`. Preserve the existing page entries and styling.
+
+## Dependencies
+
+The supplied requirements already include `pandas`, `scikit-learn`, and `streamlit`. No LLM SDK is added yet.
+
+## Important notes
+
+- Anomaly detection needs at least six monthly observations to label months as unusual.
+- Customer segmentation needs at least two eligible customers.
+- Segments and opportunity labels are statistical aids, not causal explanations or automatic pricing instructions.
+- `ml/forecasting.py` is an adapter and may need one small adjustment if the current `ForecastEngine.forecast()` signature differs from `forecast(metric=..., periods=...)`.
+- The dashboard does not modify existing dashboards or database records.

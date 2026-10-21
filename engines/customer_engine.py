@@ -1,7 +1,5 @@
-from hashlib import new
-from importlib import abc
+from __future__ import annotations
 
-from matplotlib.pylab import pareto
 import pandas as pd
 
 from database.queries import SalesQueries
@@ -14,22 +12,44 @@ class CustomerEngine:
     Responsible for analyzing customer purchasing behavior.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.refresh()
 
-    def refresh(self):
+    def refresh(self) -> None:
         """Reload all cached customer datasets."""
 
-        df = SalesQueries.customer_sales()
+        records = SalesQueries.customer_sales()
 
-        # Cache complete dataset
+        # Convert database records into a DataFrame for analysis.
+        df = pd.DataFrame(records)
+
+        # Cache complete dataset.
         self.customer_df = df
 
-        # Sales only
-        self.sales_df = df[df["transaction_type"] == "Sale"].copy()
+        # Handle an empty database safely.
+        if df.empty:
+            self.sales_df = pd.DataFrame()
+            self.returns_df = pd.DataFrame()
+            self.customer_summary_df = None
+            return
 
-        # Returns only
-        self.returns_df = df[df["transaction_type"] == "Return"].copy()
+        # Normalize transaction type before filtering.
+        transaction_type = (
+            df["transaction_type"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+        )
+
+        # Sales only.
+        self.sales_df = df[
+            transaction_type == "sale"
+        ].copy()
+
+        # Returns only.
+        self.returns_df = df[
+            transaction_type == "return"
+        ].copy()
 
         self.customer_summary_df = None
 
@@ -42,6 +62,21 @@ class CustomerEngine:
             return self.customer_summary_df
 
         df = self.sales_df
+
+        if df.empty:
+            summary = pd.DataFrame(
+                columns=[
+                    "customer",
+                    "Revenue",
+                    "Quantity",
+                    "Orders",
+                    "First_Purchase",
+                    "Last_Purchase",
+                    "Average_Order_Value",
+                ]
+            )
+            self.customer_summary_df = summary
+            return summary
 
         summary = (
             df.groupby("customer")
