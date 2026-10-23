@@ -36,6 +36,7 @@ from dashboards.components.theme import (
     apply_theme,
 )
 from engines.customer_engine import CustomerEngine
+from database.queries import SalesQueries
 
 
 # ============================================================
@@ -2864,10 +2865,14 @@ def render_contribution_section(
             '</div>'
         )
 
-    top_80_cutoff = int(
-        cumulative.ge(80.0).idxmax()
+    cutoff_positions = (
+        cumulative.ge(80.0).to_numpy().nonzero()[0]
     )
-
+    top_80_cutoff = (
+        int(cutoff_positions[0])
+        if cutoff_positions.size > 0
+        else len(positive_revenue) - 1
+    )
     pareto_customer_count = top_80_cutoff + 1
 
     pareto_customer_percentage = (
@@ -3012,28 +3017,7 @@ def main() -> None:
         )
         return
 
-    latest_date: pd.Timestamp | None = None
-
-    if not summary.empty:
-        last_purchase_column = _find_column(
-            summary,
-            (
-                "Last_Purchase",
-                "last_purchase",
-                "Last Purchase",
-            ),
-        )
-
-        if last_purchase_column is not None:
-            purchase_dates = pd.to_datetime(
-                summary[last_purchase_column],
-                errors="coerce",
-            ).dropna()
-
-            if not purchase_dates.empty:
-                latest_date = pd.Timestamp(
-                    purchase_dates.max()
-                )
+    latest_date = SalesQueries.get_latest_posting_date()
 
     render_page_header(latest_date)
 

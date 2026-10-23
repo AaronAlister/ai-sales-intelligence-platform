@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
+
 from database.db import get_connection
 from database.history import (
     get_last_upload,
@@ -71,6 +73,30 @@ class SalesQueries:
                 "successful_uploads": get_successful_upload_count(),
                 "last_upload": get_last_upload(),
             }
+
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_latest_posting_date() -> pd.Timestamp | None:
+        """Return the latest transaction date in the sales database."""
+
+        conn = get_connection()
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MAX(posting_date) FROM sales")
+            row = cursor.fetchone()
+
+            if row is None or row[0] is None:
+                return None
+
+            parsed_date = pd.to_datetime(row[0], errors="coerce")
+
+            if pd.isna(parsed_date):
+                return None
+
+            return pd.Timestamp(parsed_date)
 
         finally:
             conn.close()

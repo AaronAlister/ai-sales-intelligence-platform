@@ -1429,7 +1429,6 @@ def render_data_upload() -> None:
                STREAMLIT UPLOADER
                ===================================================== */
 
-
                Compact, clean and teal. The native dark button is
                explicitly overridden across Streamlit button variants.
                ===================================================== */
@@ -1681,7 +1680,13 @@ def render_data_upload() -> None:
     )
 
     summary = SalesQueries.get_dataset_summary()
-    last_date = str(summary["last_date"]) if summary["last_date"] else "No data"
+
+    latest_date = SalesQueries.get_latest_posting_date()
+    last_date = (
+        latest_date.strftime("%Y-%m-%d")
+        if latest_date is not None
+        else "No data"
+    )
 
     # One large container. Every data-management element belongs to it.
     with st.container(border=True, key="aq_upload_panel"):
@@ -2024,4 +2029,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    

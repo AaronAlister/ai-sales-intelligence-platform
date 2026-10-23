@@ -19,6 +19,7 @@ import streamlit as st
 from dashboards.components.navigation import render_brand, render_navigation
 from dashboards.components.theme import AQUA, DEEP_OCEAN, OCEAN, apply_theme
 from engines.forecast_engine import TimeSeriesEngine
+from database.queries import SalesQueries
 
 
 # ============================================================
@@ -1204,15 +1205,7 @@ def render_forecast_dashboard(
 
     engine = TimeSeriesEngine()
 
-    try:
-        sales = engine._sales_data()
-        latest_date = (
-            pd.to_datetime(sales["posting_date"], errors="coerce").max()
-            if not sales.empty
-            else None
-        )
-    except (KeyError, TypeError, ValueError, OSError):
-        latest_date = None
+    latest_date = SalesQueries.get_latest_posting_date()
 
     render_header(latest_date)
 

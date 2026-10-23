@@ -29,6 +29,7 @@ from dashboards.components.theme import (
     apply_theme,
 )
 from engines.pricing_engine import PricingEngine
+from database.queries import SalesQueries
 
 
 # ============================================================
@@ -1957,20 +1958,7 @@ def render_pricing_dashboard(
         )
         return
 
-    latest_date: pd.Timestamp | None = None
-
-    try:
-        sales_data = engine._sales_data()
-        if not sales_data.empty and "posting_date" in sales_data.columns:
-            parsed_dates = pd.to_datetime(
-                sales_data["posting_date"],
-                errors="coerce",
-            ).dropna()
-
-            if not parsed_dates.empty:
-                latest_date = pd.Timestamp(parsed_dates.max())
-    except (KeyError, TypeError, ValueError):
-        latest_date = None
+    latest_date = SalesQueries.get_latest_posting_date()
 
     render_header(latest_date)
     render_executive_kpis(engine)

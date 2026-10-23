@@ -28,6 +28,7 @@ from dashboards.components.theme import (
     apply_theme,
 )
 from engines.product_engine import ProductEngine
+from database.queries import SalesQueries
 
 
 # ============================================================
@@ -2391,22 +2392,7 @@ def render_product_dashboard(
         )
         return
 
-    latest_date: pd.Timestamp | None = None
-
-    monthly = engine.monthly_product_sales
-
-    if not monthly.empty and "month" in monthly.columns:
-        values = monthly["month"].dropna().astype(str).tolist()
-
-        if values:
-            parsed_date = pd.to_datetime(
-                max(values),
-                format="%Y-%m",
-                errors="coerce",
-            )
-
-            if isinstance(parsed_date, pd.Timestamp):
-                latest_date = parsed_date
+    latest_date = SalesQueries.get_latest_posting_date()
 
     st.markdown(
         '<div class="product-intelligence-page">',

@@ -31,6 +31,7 @@ from dashboards.components.theme import (
     apply_theme,
 )
 from engines.regional_engine import RegionalEngine
+from database.queries import SalesQueries
 
 
 # ============================================================
@@ -3472,34 +3473,7 @@ def render_regional_dashboard(
         )
         return
 
-    try:
-        monthly = engine.monthly_regional_sales()
-    except (
-        KeyError,
-        TypeError,
-        ValueError,
-    ):
-        monthly = pd.DataFrame()
-
-    latest_date: pd.Timestamp | None = None
-
-    if not monthly.empty and "Month" in monthly.columns:
-        values = (
-            monthly["Month"]
-            .dropna()
-            .astype(str)
-            .tolist()
-        )
-
-        if values:
-            parsed = pd.to_datetime(
-                max(values),
-                format="%Y-%m",
-                errors="coerce",
-            )
-
-            if isinstance(parsed, pd.Timestamp):
-                latest_date = parsed
+    latest_date = SalesQueries.get_latest_posting_date()
 
     render_page_header(latest_date)
 
